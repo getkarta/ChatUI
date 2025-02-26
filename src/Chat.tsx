@@ -5,22 +5,45 @@ import { Avatar, AvatarFallback, AvatarImage } from "./components/ui/avatar"
 import { Button } from "./components/ui/button"
 import { Input } from "./components/ui/input"
 import { Video, Phone, Folder, Smile, PlusCircle, Send } from 'lucide-react'
-import { sendMessage, receiveMessages } from './api'
+import { sendMessage, initializeAPI } from './api'
 import EmojiPicker from 'emoji-picker-react'
 import type { EmojiClickData } from 'emoji-picker-react'
 import ReactMarkdown from 'react-markdown'
 import { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'  // Add this import
 
+type Message = {
+  id: number;
+  sender: string;
+  content: string;
+  time: string;
+  isSelf: boolean;
+  showFeedback?: boolean;
+  feedback?: boolean | null;
+  imageUrl?: string;
+}
+
 export default function ChatInterface() {
-  const [messages, setMessages] = useState([
-    { id: 1, sender: 'Ray', content: 'Hi, how can i assist you today?', time: '12:44', isSelf: false },
+  const [messages, setMessages] = useState<Message[]>([
+    { 
+      id: 1, 
+      sender: 'Ray', 
+      content: 'Hi, how can i assist you today?', 
+      time: '12:44', 
+      isSelf: false,
+      showFeedback: true,
+      feedback: null 
+    },
   ])
   const [inputMessage, setInputMessage] = useState('')
   const [isTyping, setIsTyping] = useState(true)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [channel, setChannel] = useState('chat')
   const emojiPickerRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const initializationRef = useRef(false);
+  const [isInitialized, setIsInitialized] = useState(false);
+  const freshchatScriptRef = useRef<HTMLScriptElement | null>(null);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -33,38 +56,127 @@ export default function ChatInterface() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
+  // Add new useEffect for initialization
+  useEffect(() => {
+    const initAPI = async () => {
+      if (initializationRef.current) return;
+      initializationRef.current = true;
+      
+      try {
+        await initializeAPI(
+          'default-index',           // replace with your index value
+          'KAR001_LISGHP',     // replace with your sop_namespace value
+          'KAR001_LISGHP'       // replace with your kb_namespace value
+        );
+        setIsInitialized(true);
+      } catch (error) {
+        console.error('Error initializing API:', error);
+        initializationRef.current = false; // Reset in case of error
+      }
+    };
+
+    initAPI();
+  }, []); // Empty dependency array since we're using ref
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      // Only load the script once
+      if (!freshchatScriptRef.current) {
+        const script = document.createElement('script');
+        script.src = '//in.fw-cdn.com/32284287/1230113.js';
+        script.async = true;
+        script.setAttribute('chat', 'true');
+        script.setAttribute('data-fc-extension-id', 'your-extension-id');
+        document.head.appendChild(script);
+        freshchatScriptRef.current = script;
+      }
+    }, 1000); // Delay initialization
+
+    return () => {
+      clearTimeout(timer);
+      // Only remove the script if it exists
+      if (freshchatScriptRef.current) {
+        document.head.removeChild(freshchatScriptRef.current);
+        freshchatScriptRef.current = null;
+      }
+    };
+  }, []);
+
   const handleSendMessage = async () => {
     if (inputMessage.trim()) {
-      // Add message to UI immediately
+      // Remove feedback buttons from previous messages
+      const updatedMessages = messages.map(msg => ({
+        ...msg,
+        showFeedback: false
+      }));
+
+      // Add user message to UI immediately
       const newMessage = {
         id: messages.length + 1,
         sender: 'You',
         content: inputMessage,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        isSelf: true
+        isSelf: true,
+        showFeedback: false
       }
-      setMessages([...messages, newMessage])
+      setMessages([...updatedMessages, newMessage])
       setInputMessage('')
+      setIsTyping(true)  // Show typing indicator while waiting for response
       
       // Send message to API
       try {
-        console.log('Sending message:', inputMessage)
-        const response = await sendMessage(inputMessage)
+        const response = await sendMessage(inputMessage, true, null, channel)
         console.log('Received response:', response)
+        
         // Add AI response to messages
-        setMessages(prevMessages => [...prevMessages, {
-          id: prevMessages.length + 1,
-          sender: 'Ray',
-          content: response.reply || response.response || 'No response',
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          isSelf: false
-        }])
+        setMessages(prevMessages => {
+          const allMessagesWithoutFeedback = prevMessages.map(msg => ({
+            ...msg,
+            showFeedback: false
+          }));
+          
+          return [...allMessagesWithoutFeedback, {
+            id: prevMessages.length + 1,
+            sender: 'Ray',
+            content: response.reply || 'No response',  // Changed from response.reply || response.response
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            isSelf: false,
+            showFeedback: true,
+            feedback: null
+          }];
+        });
+        
         setIsTyping(false)
       } catch (error) {
         console.error('Error sending message:', error)
+        setIsTyping(false)
       }
     }
   }
+
+  const handleFeedback = async (messageId: number, feedback: boolean) => {
+    // First update all messages to hide feedback buttons
+    setMessages(prevMessages =>
+      prevMessages.map(msg => ({
+        ...msg,
+        showFeedback: false,
+        feedback: msg.id === messageId ? feedback : msg.feedback
+      }))
+    );
+
+    // Only proceed with API call if feedback is negative
+    if (!feedback) {
+      const message = messages.find(msg => msg.id === messageId);
+      if (message) {
+        try {
+          const messageToSend = message.isSelf ? message.content : "";
+          await sendMessage(messageToSend, feedback, null, channel);
+        } catch (error) {
+          console.error('Error sending feedback:', error);
+        }
+      }
+    }
+  };
 
   // Add key press handler for Enter key
   const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -119,6 +231,84 @@ export default function ChatInterface() {
     scrollToBottom();
   }, [messages]);
 
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      // Create a temporary URL for immediate image preview
+      const tempImageUrl = URL.createObjectURL(file);
+      
+      // Show loading state in chat with image preview
+      const tempMessage = {
+        id: messages.length + 1,
+        sender: 'You',
+        content: '',  // Empty content since we're showing the image
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        isSelf: true,
+        showFeedback: false,
+        imageUrl: tempImageUrl  // Show the image immediately
+      };
+      setMessages(prev => [...prev, tempMessage]);
+      setIsTyping(true);
+
+      // Send image using the existing API function
+      const response = await sendMessage('', true, file, channel);
+
+      if (!response) {
+        throw new Error('No response from server');
+      }
+
+      // Clean up the temporary URL
+      URL.revokeObjectURL(tempImageUrl);
+
+      // Update messages to include both the image and the AI response
+      setMessages(prevMessages => {
+        const allMessagesWithoutFeedback = prevMessages.map(msg => ({
+          ...msg,
+          showFeedback: false
+        }));
+
+        // Update the user's image message with the server URL
+        const updatedMessages = allMessagesWithoutFeedback.map(msg => 
+          msg.id === tempMessage.id 
+            ? {
+                ...msg,
+                imageUrl: response.imageUrl || tempImageUrl, // Fallback to temp URL if server URL not provided
+              }
+            : msg
+        );
+
+        // Add AI's response message
+        const aiResponse = {
+          id: prevMessages.length + 2,
+          sender: 'Ray',
+          content: response.reply || 'No response',
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          isSelf: false,
+          showFeedback: true,
+          feedback: null
+        };
+
+        return [...updatedMessages, aiResponse];
+      });
+
+      setIsTyping(false);
+    } catch (error) {
+      console.error('Error uploading image:', error);
+      setMessages(prev => prev.map(msg => 
+        msg.id === messages.length + 1
+          ? {
+              ...msg,
+              content: 'Failed to upload image. Please try again.',
+              imageUrl: undefined
+            }
+          : msg
+      ));
+      setIsTyping(false);
+    }
+  };
+
   return (
     <div className="flex justify-center w-full h-screen bg-gray-100 p-4">
       <div className="flex flex-col h-full max-w-3xl w-full border-x border-gray-200 bg-white rounded-lg">
@@ -137,6 +327,17 @@ export default function ChatInterface() {
               </span>
             </div>
           </div>
+          
+          {/* Add channel selector dropdown */}
+          <select 
+            value={channel}
+            onChange={(e) => setChannel(e.target.value)}
+            className="px-3 py-1 rounded-md border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="chat">Chat</option>
+            <option value="freshdesk">Freshdesk</option>
+          </select>
+
           <div className="flex space-x-2">
             <Button variant="ghost" size="icon"><Video className="h-5 w-5 text-blue-600" /></Button>
             <Button variant="ghost" size="icon"><Phone className="h-5 w-5 text-blue-600" /></Button>
@@ -154,20 +355,44 @@ export default function ChatInterface() {
                   <AvatarFallback>{message.sender[0]}</AvatarFallback>
                 </Avatar>
               )}
-              <div className={`max-w-xs ${message.isSelf ? 'bg-blue-500 text-white' : 'bg-white'} rounded-lg p-2 shadow`}>
-                {message.isSelf ? (
-                  <p className="text-sm">{message.content}</p>
-                ) : (
-                  <div className="prose prose-sm max-w-none prose-neutral dark:prose-invert !text-black">
-                    <ReactMarkdown 
-                      remarkPlugins={[remarkGfm]}
-                      components={markdownComponents}
+              <div className="flex flex-col">
+                <div className={`max-w-xs ${message.isSelf ? 'bg-blue-500 text-white' : 'bg-white'} rounded-lg p-2 shadow`}>
+                  {message.imageUrl ? (
+                    <img 
+                      src={message.imageUrl} 
+                      alt="Uploaded content" 
+                      className="w-32 h-32 rounded-lg object-cover"
+                    />
+                  ) : message.isSelf ? (
+                    <p className="text-sm">{message.content}</p>
+                  ) : (
+                    <div className="prose prose-sm max-w-none prose-neutral dark:prose-invert !text-black">
+                      <ReactMarkdown 
+                        remarkPlugins={[remarkGfm]}
+                        components={markdownComponents}
+                      >
+                        {message.content}
+                      </ReactMarkdown>
+                    </div>
+                  )}
+                  <span className="text-[10px] text-gray-400 mt-0.5 block">{message.time}</span>
+                </div>
+                {message.showFeedback && !message.isSelf && (
+                  <div className="flex space-x-2 mt-1">
+                    <button
+                      onClick={() => handleFeedback(message.id, true)}
+                      className={`p-1 rounded hover:bg-gray-100 ${message.feedback === true ? 'text-green-500' : 'text-gray-400'}`}
                     >
-                      {message.content}
-                    </ReactMarkdown>
+                      👍
+                    </button>
+                    <button
+                      onClick={() => handleFeedback(message.id, false)}
+                      className={`p-1 rounded hover:bg-gray-100 ${message.feedback === false ? 'text-red-500' : 'text-gray-400'}`}
+                    >
+                      👎
+                    </button>
                   </div>
                 )}
-                <span className="text-[10px] text-gray-400 mt-0.5 block">{message.time}</span>
               </div>
             </div>
           ))}
@@ -195,7 +420,20 @@ export default function ChatInterface() {
           >
             <Smile className="h-5 w-5 text-gray-500" />
           </Button>
-          <Button variant="ghost" size="icon"><PlusCircle className="h-5 w-5 text-gray-500" /></Button>
+          <Input
+            type="file"
+            accept="image/*"
+            className="hidden"
+            id="image-upload"
+            onChange={handleImageUpload}
+          />
+          <Button 
+            variant="ghost" 
+            size="icon"
+            onClick={() => document.getElementById('image-upload')?.click()}
+          >
+            <PlusCircle className="h-5 w-5 text-gray-500" />
+          </Button>
           <Input
             type="text"
             placeholder="Type your message here..."
