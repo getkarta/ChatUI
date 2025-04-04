@@ -5,7 +5,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "./components/ui/avatar"
 import { Button } from "./components/ui/button"
 import { Input } from "./components/ui/input"
 import { Video, Phone, Folder, Smile, PlusCircle, Send } from 'lucide-react'
-import { sendMessage, initializeAPI } from './api'
+import { sendMessage, initializeAPI, ContentType, MessageItem } from './api'
 import EmojiPicker from 'emoji-picker-react'
 import type { EmojiClickData } from 'emoji-picker-react'
 import ReactMarkdown from 'react-markdown'
@@ -21,6 +21,7 @@ type Message = {
   showFeedback?: boolean;
   feedback?: boolean | null;
   imageUrl?: string;
+  content_type?: ContentType;
 }
 
 export default function ChatInterface() {
@@ -117,7 +118,8 @@ export default function ChatInterface() {
         content: inputMessage,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         isSelf: true,
-        showFeedback: false
+        showFeedback: false,
+        content_type: ContentType.TEXT
       }
       setMessages([...updatedMessages, newMessage])
       setInputMessage('')
@@ -125,7 +127,7 @@ export default function ChatInterface() {
       
       // Send message to API
       try {
-        const response = await sendMessage(inputMessage, true, null, channel)
+        const response = await sendMessage(inputMessage, false, null, channel)
         console.log('Received response:', response)
         
         // Add AI response to messages
@@ -138,11 +140,12 @@ export default function ChatInterface() {
           return [...allMessagesWithoutFeedback, {
             id: prevMessages.length + 1,
             sender: 'Ray',
-            content: response.reply || 'No response',  // Changed from response.reply || response.response
+            content: response.reply || 'No response',
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             isSelf: false,
             showFeedback: true,
-            feedback: null
+            feedback: null,
+            content_type: ContentType.TEXT
           }];
         });
         
@@ -164,13 +167,13 @@ export default function ChatInterface() {
       }))
     );
 
-    // Only proceed with API call if feedback is negative
-    if (!feedback) {
+    // Only proceed with API call if feedback is positive (thumbs up)
+    if (feedback) {
       const message = messages.find(msg => msg.id === messageId);
       if (message) {
         try {
-          const messageToSend = message.isSelf ? message.content : "";
-          await sendMessage(messageToSend, feedback, null, channel);
+          // Send feedback with the message content
+          await sendMessage(message.content, true, null, channel);
         } catch (error) {
           console.error('Error sending feedback:', error);
         }
@@ -247,7 +250,8 @@ export default function ChatInterface() {
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         isSelf: true,
         showFeedback: false,
-        imageUrl: tempImageUrl  // Show the image immediately
+        imageUrl: tempImageUrl,  // Show the image immediately
+        content_type: ContentType.IMAGE
       };
       setMessages(prev => [...prev, tempMessage]);
       setIsTyping(true);
@@ -274,7 +278,8 @@ export default function ChatInterface() {
           msg.id === tempMessage.id 
             ? {
                 ...msg,
-                imageUrl: response.imageUrl || tempImageUrl, // Fallback to temp URL if server URL not provided
+                imageUrl: response.messages?.[0]?.content || tempImageUrl, // Use the content field for image URL
+                content_type: ContentType.IMAGE
               }
             : msg
         );
@@ -283,11 +288,12 @@ export default function ChatInterface() {
         const aiResponse = {
           id: prevMessages.length + 2,
           sender: 'Ray',
-          content: response.reply || 'No response',
+          content: response.messages?.[1]?.content || 'No response',
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           isSelf: false,
           showFeedback: true,
-          feedback: null
+          feedback: null,
+          content_type: response.messages?.[1]?.content_type || ContentType.TEXT
         };
 
         return [...updatedMessages, aiResponse];
@@ -301,7 +307,8 @@ export default function ChatInterface() {
           ? {
               ...msg,
               content: 'Failed to upload image. Please try again.',
-              imageUrl: undefined
+              imageUrl: undefined,
+              content_type: ContentType.TEXT
             }
           : msg
       ));
