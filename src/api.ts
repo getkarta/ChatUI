@@ -54,10 +54,24 @@ export async function sendMessage(message: string, feedback: boolean, image?: Fi
     try {
       const currentTime = new Date().toISOString();
       
+      let content = message;
+      let contentType = ContentType.TEXT;
+
+      // If there's an image, convert it to base64
+      if (image) {
+        contentType = ContentType.IMAGE;
+        content = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(image);
+        });
+      }
+
       // Create the message item
       const messageItem: MessageItem = {
-        content: message,
-        content_type: ContentType.TEXT,
+        content: content,
+        content_type: contentType,
         created_at: currentTime
       };
 

@@ -257,7 +257,7 @@ export default function ChatInterface() {
       setIsTyping(true);
 
       // Send image using the existing API function
-      const response = await sendMessage('', true, file, channel);
+      const response = await sendMessage('', false, file, channel);
 
       if (!response) {
         throw new Error('No response from server');
@@ -288,12 +288,12 @@ export default function ChatInterface() {
         const aiResponse = {
           id: prevMessages.length + 2,
           sender: 'Ray',
-          content: response.messages?.[1]?.content || 'No response',
+          content: response.reply || 'No response',
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           isSelf: false,
           showFeedback: true,
           feedback: null,
-          content_type: response.messages?.[1]?.content_type || ContentType.TEXT
+          content_type: ContentType.TEXT
         };
 
         return [...updatedMessages, aiResponse];
