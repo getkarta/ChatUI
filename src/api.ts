@@ -23,7 +23,7 @@ export interface Message {
   user_property: Record<string, any>;
 }
 
-const sessionId = uuidv4();
+export const sessionId = uuidv4();
 const clientId = 'Sma14N_67a056';
 
 export async function initializeAPI(index: string, sopNamespace: string, kbNamespace: string): Promise<any> {
@@ -36,7 +36,7 @@ export async function initializeAPI(index: string, sopNamespace: string, kbNames
 
         console.log('Initializing API with data:', data);
 
-        const response = await fetch('http://localhost:8000/api/init', {
+        const response = await fetch('http://0.0.0.0:8000/api/init', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -52,61 +52,78 @@ export async function initializeAPI(index: string, sopNamespace: string, kbNames
 export async function sendMessage(message: string, feedback: boolean, image?: File | null, channel: string = 'chat'): Promise<any> {
     console.log('Sending message:', message, 'Feedback:', feedback);
     try {
-      const currentTime = new Date().toISOString();
-      
-      let content = message;
-      let contentType = ContentType.TEXT;
+        // Create FormData object
+        const formData = new FormData();
+        formData.append('session_id', sessionId);
+        formData.append('message', message);
+        formData.append('feedback', feedback.toString());
+        formData.append('channel', channel);
+        
+        // If there's an image, append it to formData
+        if (image) {
+            formData.append('image', image);
+        }
 
-      // If there's an image, convert it to base64
-      if (image) {
-        contentType = ContentType.IMAGE;
-        content = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(image);
+        const response = await fetch('http://0.0.0.0:8000/api/chat', {
+            method: 'POST',
+            body: formData
         });
-      }
 
-      // Create the message item
-      const messageItem: MessageItem = {
-        content: content,
-        content_type: contentType,
-        created_at: currentTime
-      };
+        if (!response.ok) {
+            const errorData = await response.json();
+            console.error('Server error:', errorData);
+            throw new Error(`Server error: ${response.status}`);
+        }
 
-      // Create the full message object
-      const messageData: Message = {
-        session_id: sessionId,
-        messages: [messageItem],
-        feedback: feedback,
-        channel: channel,
-        client_id: clientId,
-        client_config: {},
-        user_property: {}
-      };
-
-      // Log the message data being sent
-      console.log('Message data being sent to backend:', JSON.stringify(messageData, null, 2));
-
-      const response = await fetch('http://localhost:8000/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(messageData)
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error('Server error:', errorData);
-        throw new Error(`Server error: ${response.status}`);
-      }
-
-      return await response.json();
+        return await response.json();
     } catch (error) {
-      console.error('Error sending message:', error);
-      throw error;
+        console.error('Error sending message:', error);
+        throw error;
     }
+}
+
+export interface DummyToolParamItem {
+  input_params: Record<string, any>;
+  response_params: Record<string, any>;
+}
+
+export interface DummyToolDefinition {
+  name: string;
+  description: string;
+  params_list: DummyToolParamItem[];
+}
+
+export interface DummyToolParams {
+  session_id: string;
+  run_id?: string;
+  messages: any[];
+  feedback: boolean;
+  channel: string;
+  client_id: string;
+  client_config?: Record<string, any>;
+  user_property?: Record<string, any>;
+  dummy_tools?: DummyToolDefinition[];
+  system_prompt?: string;
+}
+
+export async function sendDummyToolMessage(params: DummyToolParams): Promise<any> {
+  try {
+    const response = await fetch('http://0.0.0.0:8000/api/chat-dummy-tool', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(params)
+    });
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error('Server error:', errorData);
+      throw new Error(`Server error: ${response.status}`);
+    }
+    return await response.json();
+  } catch (error) {
+    console.error('Error sending dummy tool message:', error);
+    throw error;
+  }
 }
   

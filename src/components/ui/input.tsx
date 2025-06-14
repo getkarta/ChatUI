@@ -1,6 +1,6 @@
 import * as React from "react"
 
-import { cn } from "/Users/ankita/projects/chatinterface/my-chat-app/src/lib/utils"
+import { cn } from "../../lib/utils"
 
 export interface InputProps
   extends React.InputHTMLAttributes<HTMLInputElement> {}
