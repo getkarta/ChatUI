@@ -24,7 +24,14 @@ type Message = {
   content_type?: ContentType;
 }
 
-export default function ChatInterface() {
+type ChatMode = 'chat' | 'dummy-tool';
+
+interface ChatInterfaceProps {
+  mode?: ChatMode;
+  dummy_tools?: any[];
+}
+
+export default function ChatInterface({ mode = 'chat', dummy_tools }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([
     { 
       id: 1, 
@@ -45,7 +52,6 @@ export default function ChatInterface() {
   const initializationRef = useRef(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const freshchatScriptRef = useRef<HTMLScriptElement | null>(null);
-  const [dummyToolMode, setDummyToolMode] = useState(false);
   const [dummyToolsInput, setDummyToolsInput] = useState('[{"name": "EchoTool", "description": "A tool that echoes input", "params_list": [{"input_params": {"text": ""}, "response_params": {"echoed": ""}}]}]');
   const [systemPromptInput, setSystemPromptInput] = useState('Echo the input.');
   const [dummyToolsError, setDummyToolsError] = useState('');
@@ -129,9 +135,35 @@ export default function ChatInterface() {
       setInputMessage('')
       setIsTyping(true)  // Show typing indicator while waiting for response
       
-      // Send message to API
+      // Send message to correct API
       try {
-        const response = await sendMessage(inputMessage, false, null, channel)
+        let response: any;
+        if (mode === 'dummy-tool') {
+          // Prepare params for dummy tool
+          const params = {
+            session_id: sessionId,
+            messages: [
+              ...messages.map(m => ({
+                content: m.content,
+                content_type: m.content_type || ContentType.TEXT,
+                created_at: m.time
+              })),
+              {
+                content: inputMessage,
+                content_type: ContentType.TEXT,
+                created_at: new Date().toISOString()
+              }
+            ],
+            feedback: false,
+            channel: channel,
+            client_id: 'Sma14N_67a056',
+            dummy_tools: dummy_tools || [],
+            system_prompt: localStorage.getItem('system_prompt') || ''
+          };
+          response = await sendDummyToolMessage(params);
+        } else {
+          response = await sendMessage(inputMessage, false, null, channel)
+        }
         console.log('Received response:', response)
         
         // Add AI response to messages
@@ -188,11 +220,7 @@ export default function ChatInterface() {
   // Add key press handler for Enter key
   const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
-      if (dummyToolMode) {
-        handleSendDummyToolMessage();
-      } else {
-        handleSendMessage();
-      }
+      handleSendMessage();
     }
   }
 
@@ -324,61 +352,6 @@ export default function ChatInterface() {
     }
   };
 
-  const handleSendDummyToolMessage = async () => {
-    let parsedDummyTools;
-    setDummyToolsError('');
-    try {
-      parsedDummyTools = JSON.parse(dummyToolsInput);
-    } catch (e) {
-      setDummyToolsError('Invalid JSON for dummy_tools');
-      return;
-    }
-    const params = {
-      session_id: sessionId,
-      messages: [{ content: inputMessage }],
-      feedback: false,
-      channel: channel,
-      client_id: 'dummy-client',
-      dummy_tools: parsedDummyTools,
-      system_prompt: systemPromptInput
-    };
-    setMessages(prev => [...prev, {
-      id: prev.length + 1,
-      sender: 'You',
-      content: inputMessage,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      isSelf: true,
-      showFeedback: false,
-      content_type: ContentType.TEXT
-    }]);
-    setInputMessage('');
-    setIsTyping(true);
-    try {
-      const response = await sendDummyToolMessage(params);
-      setMessages(prev => [...prev, {
-        id: prev.length + 1,
-        sender: 'Ray',
-        content: response.reply || 'No response',
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        isSelf: false,
-        showFeedback: false,
-        content_type: ContentType.TEXT
-      }]);
-      setIsTyping(false);
-    } catch (error) {
-      setMessages(prev => [...prev, {
-        id: prev.length + 1,
-        sender: 'Ray',
-        content: 'Error sending dummy tool message.',
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        isSelf: false,
-        showFeedback: false,
-        content_type: ContentType.TEXT
-      }]);
-      setIsTyping(false);
-    }
-  };
-
   return (
     <div className="flex justify-center w-full h-screen bg-gray-100 p-4">
       <div className="flex flex-col h-full max-w-3xl w-full border-x border-gray-200 bg-white rounded-lg">
@@ -478,40 +451,7 @@ export default function ChatInterface() {
 
         {/* Message input */}
         <div className="bg-white p-3 flex flex-col space-y-2 border-t relative">
-          {dummyToolMode && (
-            <div className="mb-2">
-              <label className="block text-xs font-semibold mb-1">dummy_tools (JSON array):</label>
-              <textarea
-                className="w-full border rounded p-1 text-xs font-mono"
-                rows={3}
-                value={dummyToolsInput}
-                onChange={e => setDummyToolsInput(e.target.value)}
-                placeholder='[{"name": "EchoTool", ...}]'
-              />
-              {dummyToolsError && <div className="text-red-500 text-xs mt-1">{dummyToolsError}</div>}
-              <label className="block text-xs font-semibold mt-2 mb-1">system_prompt:</label>
-              <input
-                className="w-full border rounded p-1 text-xs"
-                value={systemPromptInput}
-                onChange={e => setSystemPromptInput(e.target.value)}
-                placeholder='Echo the input.'
-              />
-            </div>
-          )}
           <div className="flex items-center space-x-2">
-            <Button 
-              variant={dummyToolMode ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setDummyToolMode(!dummyToolMode)}
-              className="mr-2"
-            >
-              {dummyToolMode ? 'Dummy Tool Mode' : 'Chat Mode'}
-            </Button>
-            {showEmojiPicker && (
-              <div ref={emojiPickerRef} className="absolute bottom-full mb-2 left-0">
-                <EmojiPicker onEmojiClick={onEmojiClick} />
-              </div>
-            )}
             <Button 
               variant="ghost" 
               size="icon" 
@@ -535,7 +475,7 @@ export default function ChatInterface() {
             </Button>
             <Input
               type="text"
-              placeholder={dummyToolMode ? "Type dummy tool input..." : "Type your message here..."}
+              placeholder="Type your message here..."
               value={inputMessage}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setInputMessage(e.target.value)}
               onKeyPress={handleKeyPress}
@@ -544,7 +484,7 @@ export default function ChatInterface() {
             <Button 
               variant="default" 
               size="icon" 
-              onClick={dummyToolMode ? handleSendDummyToolMessage : handleSendMessage}
+              onClick={handleSendMessage}
               disabled={!inputMessage.trim()}
             >
               <Send className="h-5 w-5" />
